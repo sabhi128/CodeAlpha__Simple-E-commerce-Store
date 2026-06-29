@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Experience premium design and high-end gadget shopping at Lumina E-Commerce.">
+  <title>Lumina // Premium Tech Store</title>
+  <!-- Google Fonts: Outfit & Inter -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <!-- Canvas Confetti -->
+  <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+
+  <!-- Background Glow FX -->
+  <div class="glow-bg"></div>
+  <div class="glow-bg glow-2"></div>
+
+  <!-- Header / Navigation -->
+  <header>
+    <div class="container header-container">
+      <a href="#" class="logo" id="logo-btn">Lumina<span>.</span></a>
+      
+      <nav>
+        <button class="nav-link active" id="shop-nav-btn">Shop</button>
+        <button class="nav-link" id="orders-nav-btn" style="display: none;">My Orders</button>
+      </nav>
+
+      <div class="header-actions">
+        <!-- Auth state button -->
+        <button class="btn btn-secondary btn-icon" id="auth-nav-btn">
+          <i data-lucide="user"></i>
+          <span id="auth-btn-text">Sign In</span>
+        </button>
+
+        <!-- Cart trigger -->
+        <button class="btn btn-primary btn-icon btn-cart" id="cart-nav-btn">
+          <i data-lucide="shopping-bag"></i>
+          <span class="cart-badge" id="cart-count">0</span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Notification Banner -->
+  <div id="toast" class="toast"></div>
+
+  <main class="container">
+    <!-- SHOP VIEW -->
+    <section id="shop-view" class="view">
+      <!-- Hero Banner -->
+      <div class="hero">
+        <h1>Next-Gen Ambient Technology</h1>
+        <p>Curated tech design objects engineered to elevate your daily workspace aesthetics.</p>
+      </div>
+
+      <!-- Filters & Search -->
+      <div class="toolbar">
+        <div class="search-box">
+          <i data-lucide="search"></i>
+          <input type="text" id="search-input" placeholder="Search tech elements...">
+        </div>
+        <div class="categories" id="category-filters">
+          <button class="cat-btn active" data-category="">All Items</button>
+          <button class="cat-btn" data-category="Audio">Audio</button>
+          <button class="cat-btn" data-category="Wearables">Wearables</button>
+          <button class="cat-btn" data-category="Smart Home">Smart Home</button>
+          <button class="cat-btn" data-category="Accessories">Accessories</button>
+        </div>
+      </div>
+
+      <!-- Products Grid -->
+      <div class="products-grid" id="products-container">
+        <!-- Dynamic injections -->
+      </div>
+    </section>
+
+    <!-- AUTHENTICATION VIEW -->
+    <section id="auth-view" class="view" style="display: none;">
+      <div class="auth-card">
+        <div class="auth-tabs">
+          <button class="auth-tab active" id="tab-login-btn">Login</button>
+          <button class="auth-tab" id="tab-register-btn">Register</button>
+        </div>
+
+        <!-- Login Form -->
+        <form id="login-form" class="auth-form">
+          <h2>Welcome Back</h2>
+          <p>Login to your secure Lumina key-account</p>
+          <div class="form-group">
+            <label for="login-email">Email Address</label>
+            <input type="email" id="login-email" required placeholder="you@example.com">
+          </div>
+          <div class="form-group">
+            <label for="login-password">Password</label>
+            <input type="password" id="login-password" required placeholder="••••••••">
+          </div>
+          <button type="submit" class="btn btn-primary w-full">Access Account</button>
+        </form>
+
+        <!-- Register Form -->
+        <form id="register-form" class="auth-form" style="display: none;">
+          <h2>Create Account</h2>
+          <p>Register to sync your cart and orders</p>
+          <div class="form-group">
+            <label for="reg-username">Username</label>
+            <input type="text" id="reg-username" required placeholder="minimalist_geek">
+          </div>
+          <div class="form-group">
+            <label for="reg-email">Email Address</label>
+            <input type="email" id="reg-email" required placeholder="you@example.com">
+          </div>
+          <div class="form-group">
+            <label for="reg-password">Password</label>
+            <input type="password" id="reg-password" required placeholder="••••••••">
+          </div>
+          <button type="submit" class="btn btn-primary w-full">Establish Key</button>
+        </form>
+      </div>
+    </section>
+
+    <!-- ORDERS VIEW -->
+    <section id="orders-view" class="view" style="display: none;">
+      <div class="view-header">
+        <h1>Your Order Registry</h1>
+        <p>A history of all secured orders and processing statuses.</p>
+      </div>
+      <div class="orders-list" id="orders-container">
+        <!-- Dynamic injections -->
+      </div>
+    </section>
+  </main>
+
+  <!-- PRODUCT DETAILS MODAL (DYNAMIC DETAILS VIEW) -->
+  <div class="modal-backdrop" id="product-modal">
+    <div class="modal-content">
+      <button class="close-btn" id="close-modal-btn"><i data-lucide="x"></i></button>
+      <div class="modal-grid" id="modal-product-detail">
+        <!-- Dynamic contents -->
+      </div>
+    </div>
+  </div>
+
+  <!-- CART SIDE DRAWER -->
+  <div class="cart-drawer-backdrop" id="cart-drawer-backdrop"></div>
+  <div class="cart-drawer" id="cart-drawer">
+    <div class="cart-header">
+      <h2>Shopping Cart</h2>
+      <button class="btn btn-secondary btn-icon" id="close-cart-btn"><i data-lucide="chevron-right"></i></button>
+    </div>
+    
+    <div class="cart-body" id="cart-items-container">
+      <!-- Dynamic cart items -->
+    </div>
+
+    <div class="cart-footer">
+      <div class="cart-summary">
+        <div class="summary-line">
+          <span>Subtotal</span>
+          <span id="cart-subtotal">$0.00</span>
+        </div>
+        <div class="summary-line">
+          <span>Shipping</span>
+          <span class="text-green">Free</span>
+        </div>
+      </div>
+
+      <div id="cart-checkout-actions">
+        <button class="btn btn-primary w-full" id="checkout-btn">Proceed to Checkout</button>
+      </div>
+
+      <!-- Checkout Form Panel -->
+      <div id="checkout-form-container" style="display: none;">
+        <hr class="divider">
+        <h3>Delivery Information</h3>
+        <form id="checkout-form">
+          <div class="form-group">
+            <label for="shipping-address">Shipping Address</label>
+            <textarea id="shipping-address" required rows="2" placeholder="123 Cyberpunk Dr, Neo City, NY"></textarea>
+          </div>
+          <div class="form-group">
+            <label for="card-num">Card Number (Dummy)</label>
+            <input type="text" id="card-num" required placeholder="4111 2222 3333 4444">
+          </div>
+          <div class="btn-row">
+            <button type="button" class="btn btn-secondary" id="cancel-checkout-btn">Back</button>
+            <button type="submit" class="btn btn-primary" id="confirm-order-btn">Submit Order</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <script src="/js/app.js"></script>
+</body>
+</html>
