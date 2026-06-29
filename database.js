@@ -7,7 +7,10 @@ const connectionString = process.env.DATABASE_URL;
 
 const pool = new Pool({
   connectionString,
-  ssl: isProduction ? { rejectUnauthorized: false } : false
+  ssl: {
+    rejectUnauthorized: false
+  },
+  connectionTimeoutMillis: 5000 // Timeout connection attempts after 5 seconds
 });
 
 // Setup schema tables
