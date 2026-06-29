@@ -190,7 +190,9 @@ async function initDb() {
   }
 }
 
+const dbInitPromise = initDb();
+
 module.exports = {
   pool,
-  initDb
+  dbInitPromise
 };

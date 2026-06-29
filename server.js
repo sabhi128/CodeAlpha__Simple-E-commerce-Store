@@ -3,7 +3,7 @@ const cookieParser = require('cookie-parser');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const path = require('path');
-const { pool, initDb } = require('./database');
+const { pool, dbInitPromise } = require('./database');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -11,10 +11,18 @@ const JWT_SECRET = 'your-super-secret-key-change-it-in-production';
 
 app.use(express.json());
 app.use(cookieParser());
-app.use(express.static(path.join(__dirname, 'public')));
 
-// Initialize PostgreSQL Tables and Seed Data
-initDb();
+// Block requests until the database schemas and seeding have finished initialization
+app.use(async (req, res, next) => {
+  try {
+    await dbInitPromise;
+    next();
+  } catch (err) {
+    res.status(500).json({ error: 'Database initialization failed: ' + err.message });
+  }
+});
+
+app.use(express.static(path.join(__dirname, 'public')));
 
 // Middleware to authenticate JWT token from cookie
 function authenticateToken(req, res, next) {
