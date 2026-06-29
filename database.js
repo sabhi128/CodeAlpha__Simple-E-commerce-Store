@@ -1,58 +1,78 @@
-const sqlite3 = require('sqlite3').verbose();
-const path = require('path');
+const { Pool } = require('pg');
 
-const isVercel = process.env.VERCEL;
-const dbPath = isVercel ? path.join('/tmp', 'store.db') : path.join(__dirname, 'store.db');
-const db = new sqlite3.Database(dbPath);
+const isProduction = process.env.NODE_ENV === 'production';
 
-db.serialize(() => {
-  // Create Users Table
-  db.run(`CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    username TEXT UNIQUE NOT NULL,
-    email TEXT UNIQUE NOT NULL,
-    password_hash TEXT NOT NULL,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  )`);
+// Connection configuration
+const connectionString = process.env.DATABASE_URL;
 
-  // Create Products Table
-  db.run(`CREATE TABLE IF NOT EXISTS products (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
-    description TEXT NOT NULL,
-    price REAL NOT NULL,
-    category TEXT NOT NULL,
-    image_url TEXT NOT NULL,
-    stock INTEGER DEFAULT 10
-  )`);
+const pool = new Pool({
+  connectionString,
+  ssl: isProduction ? { rejectUnauthorized: false } : false
+});
 
-  // Create Orders Table
-  db.run(`CREATE TABLE IF NOT EXISTS orders (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    status TEXT DEFAULT 'Pending',
-    total_amount REAL NOT NULL,
-    shipping_address TEXT NOT NULL,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY(user_id) REFERENCES users(id)
-  )`);
+// Setup schema tables
+async function initDb() {
+  if (!connectionString) {
+    console.warn("WARNING: DATABASE_URL environment variable is missing. Skip DB initialization.");
+    return;
+  }
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
 
-  // Create Order Items Table
-  db.run(`CREATE TABLE IF NOT EXISTS order_items (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    order_id INTEGER NOT NULL,
-    product_id INTEGER NOT NULL,
-    quantity INTEGER NOT NULL,
-    price REAL NOT NULL,
-    FOREIGN KEY(order_id) REFERENCES orders(id),
-    FOREIGN KEY(product_id) REFERENCES products(id)
-  )`);
+    // Create Users Table
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS users (
+        id SERIAL PRIMARY KEY,
+        username VARCHAR(100) UNIQUE NOT NULL,
+        email VARCHAR(255) UNIQUE NOT NULL,
+        password_hash TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
 
-  // Seed Products if table is empty
-  db.get("SELECT COUNT(*) as count FROM products", (err, row) => {
-    if (row && row.count === 0) {
-      const stmt = db.prepare(`INSERT INTO products (name, description, price, category, image_url, stock) VALUES (?, ?, ?, ?, ?, ?)`);
+    // Create Products Table
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS products (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(255) NOT NULL,
+        description TEXT NOT NULL,
+        price DOUBLE PRECISION NOT NULL,
+        category VARCHAR(100) NOT NULL,
+        image_url TEXT NOT NULL,
+        stock INTEGER DEFAULT 10
+      )
+    `);
 
+    // Create Orders Table
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS orders (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        status VARCHAR(50) DEFAULT 'Pending',
+        total_amount DOUBLE PRECISION NOT NULL,
+        shipping_address TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    // Create Order Items Table
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS order_items (
+        id SERIAL PRIMARY KEY,
+        order_id INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+        product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+        quantity INTEGER NOT NULL,
+        price DOUBLE PRECISION NOT NULL
+      )
+    `);
+
+    // Seed initial products if products count is 0
+    const res = await client.query('SELECT COUNT(*) FROM products');
+    const count = parseInt(res.rows[0].count, 10);
+    
+    if (count === 0) {
+      console.log('Seeding initial premium products to PostgreSQL...');
       const seedProducts = [
         {
           name: "AeroPulse ANC Headphones",
@@ -152,13 +172,25 @@ db.serialize(() => {
         }
       ];
 
-      seedProducts.forEach(p => {
-        stmt.run(p.name, p.description, p.price, p.category, p.image_url, p.stock);
-      });
-      stmt.finalize();
-      console.log("Database seeded successfully.");
+      for (const p of seedProducts) {
+        await client.query(
+          `INSERT INTO products (name, description, price, category, image_url, stock) VALUES ($1, $2, $3, $4, $5, $6)`,
+          [p.name, p.description, p.price, p.category, p.image_url, p.stock]
+        );
+      }
+      console.log('PostgreSQL database seeded successfully.');
     }
-  });
-});
 
-module.exports = db;
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error initializing PostgreSQL tables:', err);
+  } finally {
+    client.release();
+  }
+}
+
+module.exports = {
+  pool,
+  initDb
+};

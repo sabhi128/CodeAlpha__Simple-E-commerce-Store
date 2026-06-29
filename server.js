@@ -3,7 +3,7 @@ const cookieParser = require('cookie-parser');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const path = require('path');
-const db = require('./database');
+const { pool, initDb } = require('./database');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -12,6 +12,9 @@ const JWT_SECRET = 'your-super-secret-key-change-it-in-production';
 app.use(express.json());
 app.use(cookieParser());
 app.use(express.static(path.join(__dirname, 'public')));
+
+// Initialize PostgreSQL Tables and Seed Data
+initDb();
 
 // Middleware to authenticate JWT token from cookie
 function authenticateToken(req, res, next) {
@@ -44,40 +47,40 @@ function optionalAuthenticate(req, res, next) {
 // --- AUTHENTICATION API ---
 
 // Register
-app.post('/api/auth/register', (req, res) => {
+app.post('/api/auth/register', async (req, res) => {
   const { username, email, password } = req.body;
   if (!username || !email || !password) {
     return res.status(400).json({ error: 'Please provide all details' });
   }
 
   const hash = bcrypt.hashSync(password, 10);
-  db.run(
-    `INSERT INTO users (username, email, password_hash) VALUES (?, ?, ?)`,
-    [username, email, hash],
-    function (err) {
-      if (err) {
-        if (err.message.includes('UNIQUE constraint failed')) {
-          return res.status(400).json({ error: 'Username or Email already exists.' });
-        }
-        return res.status(500).json({ error: err.message });
-      }
-      // Auto login on successful registration
-      const token = jwt.sign({ id: this.lastID, username }, JWT_SECRET, { expiresIn: '24h' });
-      res.cookie('auth_token', token, { httpOnly: true, maxAge: 24 * 60 * 60 * 1000 });
-      res.status(201).json({ message: 'User registered successfully', username });
+  try {
+    const result = await pool.query(
+      `INSERT INTO users (username, email, password_hash) VALUES ($1, $2, $3) RETURNING id`,
+      [username, email, hash]
+    );
+    const userId = result.rows[0].id;
+    const token = jwt.sign({ id: userId, username }, JWT_SECRET, { expiresIn: '24h' });
+    res.cookie('auth_token', token, { httpOnly: true, maxAge: 24 * 60 * 60 * 1000 });
+    res.status(201).json({ message: 'User registered successfully', username });
+  } catch (err) {
+    if (err.message.includes('unique') || err.message.includes('UNIQUE') || err.message.includes('duplicate key')) {
+      return res.status(400).json({ error: 'Username or Email already exists.' });
     }
-  );
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Login
-app.post('/api/auth/login', (req, res) => {
+app.post('/api/auth/login', async (req, res) => {
   const { email, password } = req.body;
   if (!email || !password) {
     return res.status(400).json({ error: 'Please enter all details' });
   }
 
-  db.get(`SELECT * FROM users WHERE email = ?`, [email], (err, user) => {
-    if (err) return res.status(500).json({ error: err.message });
+  try {
+    const result = await pool.query(`SELECT * FROM users WHERE email = $1`, [email]);
+    const user = result.rows[0];
     if (!user || !bcrypt.compareSync(password, user.password_hash)) {
       return res.status(400).json({ error: 'Invalid email or password.' });
     }
@@ -85,7 +88,9 @@ app.post('/api/auth/login', (req, res) => {
     const token = jwt.sign({ id: user.id, username: user.username }, JWT_SECRET, { expiresIn: '24h' });
     res.cookie('auth_token', token, { httpOnly: true, maxAge: 24 * 60 * 60 * 1000 });
     res.json({ message: 'Logged in successfully', username: user.username });
-  });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Logout
@@ -104,7 +109,7 @@ app.get('/api/auth/me', optionalAuthenticate, (req, res) => {
 // --- PRODUCTS API ---
 
 // Get all products
-app.get('/api/products', (req, res) => {
+app.get('/api/products', async (req, res) => {
   const { category, search } = req.query;
   let query = 'SELECT * FROM products';
   const params = [];
@@ -113,29 +118,36 @@ app.get('/api/products', (req, res) => {
     query += ' WHERE';
     const filters = [];
     if (category) {
-      filters.push(' category = ?');
       params.push(category);
+      filters.push(` category = $${params.length}`);
     }
     if (search) {
-      filters.push(' (name LIKE ? OR description LIKE ?)');
       params.push(`%${search}%`, `%${search}%`);
+      filters.push(` (name ILIKE $${params.length - 1} OR description ILIKE $${params.length})`);
     }
     query += filters.join(' AND');
   }
 
-  db.all(query, params, (err, rows) => {
-    if (err) return res.status(500).json({ error: err.message });
-    res.json(rows);
-  });
+  query += ' ORDER BY id ASC';
+
+  try {
+    const result = await pool.query(query, params);
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Get product details by id
-app.get('/api/products/:id', (req, res) => {
-  db.get('SELECT * FROM products WHERE id = ?', [req.params.id], (err, product) => {
-    if (err) return res.status(500).json({ error: err.message });
+app.get('/api/products/:id', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM products WHERE id = $1', [req.params.id]);
+    const product = result.rows[0];
     if (!product) return res.status(404).json({ error: 'Product not found' });
     res.json(product);
-  });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 
@@ -148,78 +160,84 @@ app.post('/api/orders', authenticateToken, async (req, res) => {
     return res.status(400).json({ error: 'Missing cart items or shipping address.' });
   }
 
+  const client = await pool.connect();
   try {
-    // We run the order placement transactionally
-    db.serialize(() => {
-      // Calculate total
-      let totalAmount = 0;
-      const productIds = cart.map(item => item.product_id);
+    await client.query('BEGIN');
+
+    // Calculate total
+    let totalAmount = 0;
+    const productIds = cart.map(item => item.product_id);
+    
+    const productsResult = await client.query(
+      `SELECT * FROM products WHERE id IN (${productIds.map((_, i) => `$${i + 1}`).join(',')})`,
+      productIds
+    );
+    const products = productsResult.rows;
+    const productsMap = {};
+    products.forEach(p => { productsMap[p.id] = p; });
+
+    // Validate stock and calculate total
+    for (const item of cart) {
+      const product = productsMap[item.product_id];
+      if (!product) {
+        throw new Error(`Product with ID ${item.product_id} not found.`);
+      }
+      if (product.stock < item.quantity) {
+        throw new Error(`Insufficient stock for ${product.name}.`);
+      }
+      totalAmount += product.price * item.quantity;
+    }
+
+    // Insert Order
+    const orderResult = await client.query(
+      `INSERT INTO orders (user_id, total_amount, shipping_address) VALUES ($1, $2, $3) RETURNING id`,
+      [req.user.id, totalAmount, shipping_address]
+    );
+    const orderId = orderResult.rows[0].id;
+
+    // Insert Order Items and Update Stocks
+    for (const item of cart) {
+      const product = productsMap[item.product_id];
       
-      db.all(`SELECT * FROM products WHERE id IN (${productIds.map(() => '?').join(',')})`, productIds, (err, products) => {
-        if (err) return res.status(500).json({ error: 'Database error reading products.' });
-        
-        const productsMap = {};
-        products.forEach(p => { productsMap[p.id] = p; });
+      await client.query(
+        `INSERT INTO order_items (order_id, product_id, quantity, price) VALUES ($1, $2, $3, $4)`,
+        [orderId, item.product_id, item.quantity, product.price]
+      );
+      
+      await client.query(
+        `UPDATE products SET stock = stock - $1 WHERE id = $2`,
+        [item.quantity, item.product_id]
+      );
+    }
 
-        // Validate stock and calculate total
-        for (const item of cart) {
-          const product = productsMap[item.product_id];
-          if (!product) {
-            return res.status(400).json({ error: `Product with ID ${item.product_id} not found.` });
-          }
-          if (product.stock < item.quantity) {
-            return res.status(400).json({ error: `Insufficient stock for ${product.name}.` });
-          }
-          totalAmount += product.price * item.quantity;
-        }
-
-        // Insert Order
-        db.run(
-          `INSERT INTO orders (user_id, total_amount, shipping_address) VALUES (?, ?, ?)`,
-          [req.user.id, totalAmount, shipping_address],
-          function (err) {
-            if (err) return res.status(500).json({ error: 'Failed to create order.' });
-            
-            const orderId = this.lastID;
-            const insertItemStmt = db.prepare(`INSERT INTO order_items (order_id, product_id, quantity, price) VALUES (?, ?, ?, ?)`);
-            const updateStockStmt = db.prepare(`UPDATE products SET stock = stock - ? WHERE id = ?`);
-
-            cart.forEach(item => {
-              const product = productsMap[item.product_id];
-              insertItemStmt.run(orderId, item.product_id, item.quantity, product.price);
-              updateStockStmt.run(item.quantity, item.product_id);
-            });
-
-            insertItemStmt.finalize();
-            updateStockStmt.finalize();
-
-            res.status(201).json({ message: 'Order processed successfully.', orderId, total: totalAmount });
-          }
-        );
-      });
-    });
+    await client.query('COMMIT');
+    res.status(201).json({ message: 'Order processed successfully.', orderId, total: totalAmount });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    await client.query('ROLLBACK');
+    res.status(400).json({ error: err.message });
+  } finally {
+    client.release();
   }
 });
 
 // Get user orders (Order History)
-app.get('/api/orders/history', authenticateToken, (req, res) => {
-  db.all(
-    `SELECT o.id, o.status, o.total_amount, o.shipping_address, o.created_at,
-     GROUP_CONCAT(p.name || ' (x' || oi.quantity || ')') as items
-     FROM orders o
-     JOIN order_items oi ON o.id = oi.order_id
-     JOIN products p ON oi.product_id = p.id
-     WHERE o.user_id = ?
-     GROUP BY o.id
-     ORDER BY o.created_at DESC`,
-    [req.user.id],
-    (err, rows) => {
-      if (err) return res.status(500).json({ error: err.message });
-      res.json(rows);
-    }
-  );
+app.get('/api/orders/history', authenticateToken, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT o.id, o.status, o.total_amount, o.shipping_address, o.created_at,
+       STRING_AGG(p.name || ' (x' || oi.quantity || ')', ', ') as items
+       FROM orders o
+       JOIN order_items oi ON o.id = oi.order_id
+       JOIN products p ON oi.product_id = p.id
+       WHERE o.user_id = $1
+       GROUP BY o.id
+       ORDER BY o.created_at DESC`,
+      [req.user.id]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Serve frontend routing fallback
